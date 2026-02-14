@@ -9,7 +9,7 @@ from pathlib import Path
 from swebench.harness.constants import (
     APPLY_PATCH_FAIL,
     APPLY_PATCH_PASS,
-    DOCKER_PATCH,
+    DOCKER_PATCH,   # "/tmp/patch.diff"
     DOCKER_USER,
     DOCKER_WORKDIR,
     KEY_INSTANCE_ID,
@@ -32,6 +32,13 @@ from swesmith.constants import (
     TEST_OUTPUT_END,
     TEST_OUTPUT_START,
 )
+
+# GIT_APPLY_CMDS = [
+#     "git apply --verbose",
+#     "git apply --verbose --reject",
+#     "patch --batch --fuzz=5 -p1 -i",
+# ]
+
 from swesmith.profiles import registry
 from unidiff import PatchSet
 
@@ -62,35 +69,142 @@ def matches_instance_filter(instance_id: str, instance_ids: list[str] | None) ->
     return False
 
 
+# def _apply_patch(
+#     instance_id: str, container: Container, logger: Logger, is_gold: bool = False
+# ):
+#     """
+#     Apply a patch to a container's codebase
+#     """
+#     apply_succeeded = False
+#     for git_apply_cmd in GIT_APPLY_CMDS:
+#         # Because gold patches = bug patches, so fix = revert
+#         git_apply_cmd = (
+#             f"{git_apply_cmd} {DOCKER_PATCH}"
+#             if not is_gold
+#             else f"{git_apply_cmd} --reverse {DOCKER_PATCH}"
+#         )
+#         val = container.exec_run(
+#             git_apply_cmd, workdir=DOCKER_WORKDIR, user=DOCKER_USER
+#         )
+#         if val.exit_code == 0:
+#             apply_succeeded = True
+#             logger.info(f"{APPLY_PATCH_PASS}:\n{val.output.decode(UTF8)}")
+#             break
+#         logger.info(
+#             f"Failed to apply patch to container with {git_apply_cmd}.\n"
+#             + f"Error Message: {val.output.decode(UTF8)}\nTrying again..."
+#         )
+#     if not apply_succeeded:
+#         apply_failed_msg = f"{APPLY_PATCH_FAIL}:\n{val.output.decode(UTF8)}"
+#         logger.info(apply_failed_msg)
+#         raise EvaluationError(instance_id, apply_failed_msg, logger)
+
 def _apply_patch(
-    instance_id: str, container: Container, logger: Logger, is_gold: bool = False
+    instance_id: str,
+    container: Container,
+    logger: Logger,
+    is_gold: bool = False,
 ):
     """
     Apply a patch to a container's codebase
     """
     apply_succeeded = False
-    for git_apply_cmd in GIT_APPLY_CMDS:
-        # Because gold patches = bug patches, so fix = revert
-        git_apply_cmd = (
-            f"{git_apply_cmd} {DOCKER_PATCH}"
-            if not is_gold
-            else f"{git_apply_cmd} --reverse {DOCKER_PATCH}"
-        )
+
+    # Read patch content from the file we copied into container
+
+    for base_cmd in GIT_APPLY_CMDS:
+        # Handle git apply commands
+        
+        if base_cmd.startswith("git apply"):
+            flags = "--ignore-whitespace --ignore-space-change --3way --verbose"
+            if is_gold:
+                cmd = f"{base_cmd} {flags} --reverse {DOCKER_PATCH}"
+            else:
+                cmd = f"{base_cmd} {flags} {DOCKER_PATCH}"
+
+        # Handle patch command (uses -i, needs -R for reverse)
+        elif base_cmd.startswith("patch"):
+            # Use -l (lowercase L) to ignore whitespace
+            # -p1 to strip the 'a/' and 'b/' prefixes from the diff
+            if is_gold:
+                cmd = f"patch -R -p1 -l < {DOCKER_PATCH}"
+            else:
+                cmd = f"patch -p1 -l < {DOCKER_PATCH}"
+            # Since we are using redirection, we must wrap the command in a shell
+            cmd = f"/bin/bash -c '{cmd}'"
+        else:
+            # Fallback (should not happen, but safe)
+            cmd = f"{base_cmd} {DOCKER_PATCH}"
+
         val = container.exec_run(
-            git_apply_cmd, workdir=DOCKER_WORKDIR, user=DOCKER_USER
+            cmd,
+            workdir=DOCKER_WORKDIR,
+            user=DOCKER_USER,
         )
+
         if val.exit_code == 0:
             apply_succeeded = True
             logger.info(f"{APPLY_PATCH_PASS}:\n{val.output.decode(UTF8)}")
             break
+
         logger.info(
-            f"Failed to apply patch to container with {git_apply_cmd}.\n"
-            + f"Error Message: {val.output.decode(UTF8)}\nTrying again..."
+            f"Failed to apply patch with: {cmd}\n"
+            f"Error: {val.output.decode(UTF8)}\nTrying next..."
         )
+
     if not apply_succeeded:
-        apply_failed_msg = f"{APPLY_PATCH_FAIL}:\n{val.output.decode(UTF8)}"
-        logger.info(apply_failed_msg)
-        raise EvaluationError(instance_id, apply_failed_msg, logger)
+        raise EvaluationError(
+            instance_id,
+            f"{APPLY_PATCH_FAIL}:\n{val.output.decode(UTF8)}",
+            logger,
+        )
+
+
+# def _apply_patch(instance_id: str, container: Container, logger: Logger, is_gold: bool = False):
+#     """
+#     Emergency force-patch application.
+#     """
+#     # 1. First, try the standard git apply but with 3way and ignore whitespace
+#     # 2. If it fails, use the 'patch' utility which is better at ignoring context shifts
+    
+#     apply_succeeded = False
+    
+#     # We define our own commands here to ensure flags are exactly right
+#     commands = []
+    
+#     # Try Git first (cleanest)
+#     git_flags = "--ignore-whitespace --ignore-space-change --verbose"
+#     if is_gold:
+#         commands.append(f"git apply {git_flags} --reverse {DOCKER_PATCH}")
+#     else:
+#         commands.append(f"git apply {git_flags} {DOCKER_PATCH}")
+
+#     # Try 'patch' utility (most forceful)
+#     # --batch: non-interactive
+#     # --fuzz=5: very forgiving with line numbers
+#     # -l: ignore whitespace
+#     # -f: force (don't ask questions)
+#     patch_flags = "--batch --fuzz=5 -p1 -l -f"
+#     if is_gold:
+#         commands.append(f"/bin/bash -c 'patch -R {patch_flags} < {DOCKER_PATCH}'")
+#     else:
+#         commands.append(f"/bin/bash -c 'patch {patch_flags} < {DOCKER_PATCH}'")
+
+#     for cmd in commands:
+#         val = container.exec_run(cmd, workdir=DOCKER_WORKDIR, user=DOCKER_USER)
+        
+#         # Check if it actually reversed or if it 'ignored -R'
+#         output = val.output.decode(UTF8)
+#         if val.exit_code == 0 and "Ignoring -R" not in output:
+#             apply_succeeded = True
+#             logger.info(f"{APPLY_PATCH_PASS}:\n{output}")
+#             break
+            
+#         logger.info(f"Failed or skipped reversal with {cmd}: {output}")
+
+#     if not apply_succeeded:
+#         raise EvaluationError(instance_id, "FORCE PATCH FAILED", logger)
+
 
 
 def run_patch_in_container(
@@ -136,6 +250,15 @@ def run_patch_in_container(
 
         # Start docker container
         rp.pull_image()
+        # Deleting Old Container to fix the Eval Issue
+        # Add This Block
+        try:
+            old_container = client.containers.get(container_name)
+            logger.info(f"Removing stale container: {container_name}")
+            old_container.remove(force=True)
+        except docker.errors.NotFound:
+            pass
+        # -------- End of Block ------------
         container = client.containers.create(
             image=rp.image_name,
             name=container_name,
@@ -157,7 +280,11 @@ def run_patch_in_container(
             if val.exit_code != 0:
                 logger.info(f"CHECKOUT FAILED: {val.output.decode(UTF8)}")
                 return logger, False
-            if is_eval:
+            # <<< ADD THIS: Reset & clean container to ensure patch applies
+            container.exec_run("git reset --hard", workdir=DOCKER_WORKDIR, user=DOCKER_USER)
+            container.exec_run("git clean -fdx", workdir=DOCKER_WORKDIR, user=DOCKER_USER)
+            
+            if is_eval and commit is None:
                 # NOTE: Key assumption we make is that each branch has two commits
                 # 1. Bug commit
                 # 2. F2P Test File(s) removal commit (on top of 1).
@@ -189,7 +316,7 @@ def run_patch_in_container(
             patch_file.write_text(patch)
             logger.info(f"Patch written to {patch_file}, now applying to container...")
             copy_to_container(container, patch_file, Path(DOCKER_PATCH))
-            _apply_patch(instance_id, container, logger, is_gold)
+            _apply_patch(instance_id, container, logger, is_gold) #is_gold)
 
             if is_eval:
                 # For evaluation, removes any changes to test related files.

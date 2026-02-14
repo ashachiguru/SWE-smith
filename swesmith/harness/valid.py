@@ -133,6 +133,8 @@ def run_validation(instance: dict) -> dict:
         val_postgold_path=val_postgold_path,
         instance=instance,
     )
+    if "base_commit" in instance:
+        report["base_commit"] = instance["base_commit"]
     logger.info(f"Report: {json.dumps(report)}")
 
     # Write report to report.json

@@ -1,0 +1,51 @@
+name: tag_aware_lm
+max_tag_bug_types: 5
+
+tag_to_bug_type:
+  IS_FUNCTION: "Reorder operations while maintaining syntax: Rearrange steps in a process so the function produces incorrect intermediate results, while maintaining without breaking the code."
+  HAS_EXCEPTION: "Swallow exceptions silently: Introduce logic that catches an error but doesn't log or handle it properly, leading to silent failures."
+  HAS_IF: "Modify logic in conditionals: Adjust conditions (e.g., replace <= with <) to change the control flow."
+  HAS_LOOP: "Modify logic in loops: Adjust loop boundaries (e.g., start at index 1 instead of 0) to change control flow."
+  HAS_FUNCTION_CALL: "Swap parameters passed into function calls or alter argument values to change behavior."
+  HAS_LIST_COMPREHENSION: "Change list comprehension logic."
+  HAS_LIST_INDEXING: "Introduce off-by-one errors in indices or loop boundaries."
+  HAS_OFF_BY_ONE: "Add or subtract one from conditional boundaries (<, >, <=, >=) to alter logic."
+  HAS_RETURN: "Return a default or wrong value silently."
+  HAS_ARITHMETIC: "Alter calculation order for incorrect results (e.g., (a + b) * c -> a + (b * c))."
+  HAS_ASSIGNMENT: "Change variable assignments to alter computation state with wrong/outdated values."
+  HAS_BOOL_OP: "Alter boolean operation order to produce incorrect logic outcomes."
+
+system: |-
+  You are a software developer and your job is to rewrite a function such that it introduces a logical bug that will break existing unit test(s) in a codebase.
+
+  Tips:
+  - It should not cause compilation errors.
+  - It should not be a syntax error.
+  - It should be subtle and challenging to detect.
+  - It should not modify the function signature.
+  - It should not modify the class signature.
+  - It should not modify the documentation significantly.
+  - For longer functions, if there is an opportunity to introduce multiple bugs, please do.
+  - Please DO NOT INCLUDE COMMENTS IN THE CODE indicating the bug location or the bug itself.
+
+  Your answer should be formatted as follows:
+
+  Explanation:
+  <explanation>
+
+  Bugged Code:
+  ```
+  <bugged_code>
+  ```
+
+instance: |-
+  Please introduce the following types of bugs:
+  {tag_bug_types}
+
+  <INPUT>
+  {src_code}
+  </INPUT>
+
+  <IMPORTANT>As a reminder, Please DO NOT INCLUDE ANY COMMENTS IN THE CODE OR POINT OUT THE BUG IN ANY WAY.</IMPORTANT>
+
+  OUTPUT:

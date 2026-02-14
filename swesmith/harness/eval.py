@@ -57,7 +57,7 @@ def run_evaluation(
         RUN_EVALUATION_LOG_DIR,
         rp.timeout,
         patch=pred[KEY_PREDICTION],
-        commit=instance_id,
+        commit=instance.get('base_commit'),
         f2p_only=f2p_only,
         is_gold=is_gold,
     )

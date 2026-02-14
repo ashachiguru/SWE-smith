@@ -190,11 +190,13 @@ def _main(
 
         with open(path_results) as f:
             results = json.load(f)
+        base_commit = results.get("base_commit")
         if FAIL_TO_PASS not in results or PASS_TO_PASS not in results:
             stats = skip_print(
                 f"{subfolder}: No validatable bugs", pbar, stats, verbose
             )
             continue
+        
 
         n_f2p = len(results[FAIL_TO_PASS])
         n_p2p = len(results[PASS_TO_PASS])
@@ -218,6 +220,7 @@ def _main(
             KEY_PATCH: patch_content,
             FAIL_TO_PASS: results[FAIL_TO_PASS],
             PASS_TO_PASS: results[PASS_TO_PASS],
+            "base_commit": base_commit,
         }
         rp = registry.get_from_inst(task_instance)
         task_instance[KEY_IMAGE_NAME] = rp.image_name
@@ -315,7 +318,7 @@ def _main(
             print(f"[{subfolder}] No test files to remove")
 
         cmds = [
-            f"git push origin {subfolder}",
+            # f"git push origin {subfolder}",
             f"git checkout {main_branch}",
             "git reset --hard",
             f"git branch -D {subfolder}",
@@ -337,7 +340,7 @@ def _main(
     if len(created_repos) > 0:
         print("Cleaning up...")
         for repo in created_repos:
-            shutil.rmtree(repo)
+            # shutil.rmtree(repo)
             print(f"[{repo}] Removed local clone")
             if repush_image:
                 print(f"[{repo}] Rebuilding + pushing image")
